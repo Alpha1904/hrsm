@@ -1,0 +1,307 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            Int       @id @default(autoincrement())
+  name          String
+  contactInfo   String
+  site          String // Multi-site support
+  role          Role
+  employee      Employee? @relation("UserEmployee")
+  manager       Manager? @relation("UserManager")
+  hrAdmin       HR_Admin? @relation("UserHRAdmin")
+  recruiter     Recruiter? @relation("UserRecruiter")
+  sentMessages  Message[] @relation("SentMessages")
+  receivedMessages Message[] @relation("ReceivedMessages")
+  @@index([site]) // Optimize site-based queries
+}
+
+enum Role {
+  EMPLOYEE
+  MANAGER
+  HR_ADMIN
+  RECRUITER
+}
+
+model Permissions {
+  id            Int       @id @default(autoincrement())
+  role          Role
+  resource      String // e.g., Employee, Leave
+  actions       String[] // e.g., ["read", "write", "approve"]
+  site          String? // Optional, for site-specific permissions
+  @@index([role, resource]) // Optimize RBAC queries
+}
+
+model Manager {
+  id            Int       @id @default(autoincrement())
+  userId        Int       @unique
+  user          User      @relation("UserManager", fields: [userId], references: [id], onDelete: Cascade)
+  team          Employee[] @relation("ManageBy") // IDs of managed Employees
+  leaves        Leave[] @relation("ManagerApprovals")
+  evaluations   Evaluation[] @relation("ManagerEvaluations")
+  trainings     Training[] @relation("ManagerAssignments")
+  @@index([userId])
+}
+model Employee {
+  id            Int       @id @default(autoincrement())
+  userId        Int       @unique
+  managerId     Int
+  user          User      @relation("UserEmployee", fields: [userId], references: [id], onDelete: Cascade)
+  position      String
+  department    String
+  seniority     Int // Years in company
+  contractStart DateTime
+  contractEnd   DateTime?
+  contractType  ContractType
+  documents     Document[] @relation("EmployeeDocuments")
+  leaves        Leave[] @relation("EmployeeLeaves")
+  schedule      Schedule? @relation("EmployeeSchedule")
+  evaluations   Evaluation[] @relation("EmployeeEvaluations")
+  trainings     Training[] @relation("EmployeeTrainings")
+  payments      Payment[] @relation("EmployeePayments")
+  departure     Departure? @relation("EmployeeDeparture")
+  manager       Manager @relation("ManageBy", fields: [managerId], references: [id], onDelete: Cascade)
+  //managedBy     Manager? @relation("ManagedEmployees")
+  @@index([department, userId])
+}
+
+
+model HR_Admin {
+  id            Int       @id @default(autoincrement())
+  userId        Int       @unique
+  user          User      @relation("UserHRAdmin", fields: [userId], references: [id], onDelete: Cascade)
+  sitesManaged  String[] // Array of managed sites
+  reports       Report[] @relation("HRAdminReports")
+  payments      Payment[] @relation("HRAdminPayments")
+  announcements Announcement[] @relation("HRAdminAnnouncements")
+  departures    Departure[] @relation("HRAdminDepartures")
+  leaves        Leave[] @relation("HRAdminOverrides")
+  @@index([userId])
+}
+
+model Recruiter {
+  id            Int       @id @default(autoincrement())
+  userId        Int       @unique
+  user          User      @relation("UserRecruiter", fields: [userId], references: [id], onDelete: Cascade)
+  jobPostings   JobPosting[] @relation("RecruiterPostings")
+  applications  Application[] @relation("RecruiterReviews")
+  messages      Message[] @relation("RecruiterMessages")
+  @@index([userId])
+}
+
+model Candidate {
+  id            Int       @id @default(autoincrement())
+  name          String
+  contactInfo   String
+  applications  Application[] @relation("CandidateApplications")
+  documents     Document[] @relation("CandidateDocuments")
+}
+
+model Document {
+  id            Int       @id @default(autoincrement())
+  fileName      String
+  type          String // e.g., MedicalCert, Payslip, Resume
+  uploadDate    DateTime
+  content       Bytes // Or URL to storage
+  employeeId    Int?
+  employee      Employee? @relation("EmployeeDocuments", fields: [employeeId], references: [id])
+  candidateId   Int?
+  candidate     Candidate? @relation("CandidateDocuments", fields: [candidateId], references: [id])
+  applicationId Int?  @unique
+  application   Application? @relation("ApplicationDocument", fields: [applicationId], references: [id])
+}
+
+model Leave {
+  id            Int       @id @default(autoincrement())
+  employeeId    Int
+  employee      Employee  @relation("EmployeeLeaves", fields: [employeeId], references: [id], onDelete: Cascade)
+  managerId     Int?
+  manager       Manager?  @relation("ManagerApprovals", fields: [managerId], references: [id])
+  hrAdminId     Int?
+  hrAdmin       HR_Admin? @relation("HRAdminOverrides", fields: [hrAdminId], references: [id])
+  type          LeaveType
+  startDate     DateTime
+  endDate       DateTime
+  status        LeaveStatus @default(Pending)
+  balanceRemaining Float
+  @@index([employeeId, status])
+}
+
+model Schedule {
+  id            Int       @id @default(autoincrement())
+  employeeId    Int       @unique
+  employee      Employee  @relation("EmployeeSchedule", fields: [employeeId], references: [id], onDelete: Cascade)
+  shifts        Json[] // Array of {day: String, startTime: Time, endTime: Time}
+  rotationType  String?
+  @@index([employeeId])
+}
+
+model Evaluation {
+  id            Int       @id @default(autoincrement())
+  employeeId    Int
+  employee      Employee  @relation("EmployeeEvaluations", fields: [employeeId], references: [id], onDelete: Cascade)
+  managerId     Int?
+  manager       Manager?  @relation("ManagerEvaluations", fields: [managerId], references: [id])
+  period        EvalPeriod
+  scores        Json // {skill1: Int, skill2: Int}
+  achievements  String?
+  improvements  String?
+  goals         String[]
+  selfEval      Boolean   @default(false)
+  @@index([employeeId, period])
+}
+
+model JobPosting {
+  id            Int       @id @default(autoincrement())
+  title         String
+  description   String
+  department    String
+  site          String
+  status        PostingStatus @default(Open)
+  recruiterId   Int
+  recruiter     Recruiter @relation("RecruiterPostings", fields: [recruiterId], references: [id], onDelete: Cascade)
+  applications  Application[] @relation("PostingApplications")
+  @@index([recruiterId, site])
+}
+
+model Application {
+  id            Int       @id @default(autoincrement())
+  candidateId   Int
+  candidate     Candidate @relation("CandidateApplications", fields: [candidateId], references: [id], onDelete: Cascade)
+  postingId     Int
+  jobPosting    JobPosting @relation("PostingApplications", fields: [postingId], references: [id], onDelete: Cascade)
+  recruiterId   Int?
+  recruiter     Recruiter? @relation("RecruiterReviews", fields: [recruiterId], references: [id])
+  status        ApplicationStatus @default(Pending)
+  document      Document? @relation("ApplicationDocument")
+  @@index([candidateId, postingId])
+}
+
+model Training {
+  id            Int       @id @default(autoincrement())
+  title         String
+  type          TrainingType
+  completionDate DateTime?
+  certification String?
+  employeeId    Int
+  employee      Employee  @relation("EmployeeTrainings", fields: [employeeId], references: [id], onDelete: Cascade)
+  managerId     Int?
+  manager       Manager?  @relation("ManagerAssignments", fields: [managerId], references: [id])
+  @@index([employeeId])
+}
+
+model Payment {
+  id            Int       @id @default(autoincrement())
+  employeeId    Int
+  employee      Employee  @relation("EmployeePayments", fields: [employeeId], references: [id], onDelete: Cascade)
+  hrAdminId     Int?
+  hrAdmin       HR_Admin? @relation("HRAdminPayments", fields: [hrAdminId], references: [id])
+  baseSalary    Float
+  bonuses       Float?
+  primes        Float?
+  payslipDate   DateTime
+  @@index([employeeId, payslipDate])
+}
+
+model Message {
+  id            Int       @id @default(autoincrement())
+  senderId      Int
+  sender        User      @relation("SentMessages", fields: [senderId], references: [id])
+  receiverId    Int
+  receiver      User      @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  recruiterId   Int?
+  recruiter     Recruiter? @relation("RecruiterMessages", fields: [recruiterId], references: [id])
+  content       String
+  timestamp     DateTime
+  @@index([senderId, receiverId])
+}
+
+model Announcement {
+  id            Int       @id @default(autoincrement())
+  hrAdminId     Int
+  hrAdmin       HR_Admin  @relation("HRAdminAnnouncements", fields: [hrAdminId], references: [id], onDelete: Cascade)
+  title         String
+  content       String
+  publishDate   DateTime
+  @@index([hrAdminId])
+}
+
+model Departure {
+  id            Int       @id @default(autoincrement())
+  employeeId    Int       @unique
+  employee      Employee  @relation("EmployeeDeparture", fields: [employeeId], references: [id], onDelete: Cascade)
+  hrAdminId     Int?
+  hrAdmin       HR_Admin? @relation("HRAdminDepartures", fields: [hrAdminId], references: [id])
+  reason        DepartureReason
+  exitDate      DateTime
+  indemnity     Float?
+  surveyResponses Json?
+  @@index([employeeId])
+}
+
+model Report {
+  id            Int       @id @default(autoincrement())
+  hrAdminId     Int
+  hrAdmin       HR_Admin  @relation("HRAdminReports", fields: [hrAdminId], references: [id], onDelete: Cascade)
+  type          ReportType
+  data          Json
+  generatedDate DateTime
+  @@index([hrAdminId, type])
+}
+
+enum ContractType {
+  FullTime
+  PartTime
+  Contract
+}
+
+enum LeaveType {
+  Vacation
+  Sick
+  Maternity
+}
+
+enum LeaveStatus {
+  Pending
+  Approved
+  Rejected
+}
+
+enum EvalPeriod {
+  Quarterly
+  Annual
+}
+
+enum PostingStatus {
+  Open
+  Closed
+}
+
+enum ApplicationStatus {
+  Pending
+  Selected
+  Rejected
+}
+
+enum TrainingType {
+  Internal
+  External
+}
+
+enum DepartureReason {
+  Resignation
+  Firing
+  Retirement
+}
+
+enum ReportType {
+  Performance
+  Absence
+  Salary
+}
