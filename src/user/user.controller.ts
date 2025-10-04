@@ -3,10 +3,13 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseIntPipe,
   Patch,
   Post,
+  UseGuards,
   UsePipes,
   ValidationPipe,
 } from '@nestjs/common';
@@ -14,6 +17,10 @@ import { UserService } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateEmployeeDetailsDto } from './dto/update-employee-details.dto';
 import { UpdateHRAdminSitesDto } from './dto/update-hr-admin-sites.dto';
+import { Roles } from 'src/auth/decorators/roles.decorator';
+import { Role } from '@prisma/client';
+import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { RolesGuard } from 'src/auth/guards/roles.guard';
 
 @Controller('user')
 @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
@@ -21,18 +28,22 @@ export class UserController {
   constructor(private readonly userService: UserService) {}
 
   // Get all users
-  @Get('all')
+  @Get()
   async getAll() {
     return await this.userService.getAll();
   }
 
   // Get all managers with comprehensive data
+  @Roles(Role.MANAGER, Role.HR_ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Get('managers')
   async getAllManagers() {
     return await this.userService.getAllManagers();
   }
 
   // Get all HrAdmin
+  @Roles(Role.MANAGER, Role.HR_ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Get('hradmins')
   async getAllHrAdmins() {
     return await this.userService.getAllHrAdmins();
@@ -56,6 +67,9 @@ export class UserController {
   }
   // Create a new user
 
+  // @Roles(Role.HR_ADMIN)
+  // @UseGuards(JwtAuthGuard, RolesGuard)
+  @HttpCode(HttpStatus.CREATED)
   @Post()
   async create(@Body() createUserDto: CreateUserDto) {
     return await this.userService.create(createUserDto);
@@ -94,6 +108,8 @@ export class UserController {
     );
   }
   // Delete user by ID
+    @Roles(Role.HR_ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Delete('delete/:userId')
   async deleteUser(@Param('userId', ParseIntPipe) userId: number) {
     return await this.userService.deleteUser(userId);

@@ -15,10 +15,12 @@ import {
 } from '@prisma/client';
 import { UpdateEmployeeDetailsDto } from './dto/update-employee-details.dto';
 import { UpdateHRAdminSitesDto } from './dto/update-hr-admin-sites.dto';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UserService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService,
+  ) {}
 
   async getAll() {
     return await this.prisma.user.findMany();
@@ -45,12 +47,15 @@ export class UserService {
           throw new NotFoundException('Manager not found');
         }
       }
+      //hash password
+      const hashedPassword = await this.hashPassword(createUserDto.password);
 
       return await this.prisma.$transaction(async (tx) => {
         // Create the user first
         const user = await tx.user.create({
           data: {
             name: createUserDto.name,
+            password: hashedPassword,
             contactInfo: createUserDto.contactInfo,
             site: createUserDto.site,
             role: createUserDto.role,
@@ -65,17 +70,45 @@ export class UserService {
           createUserDto,
         );
 
-        // Return just the basic user object
-        return user;
+        const { password, ...result } = user; // Exclude password from returned user
+        return result as User;
       });
     } catch (error) {
-      if (
-        error instanceof ConflictException ||
-        error instanceof NotFoundException
-      ) {
-        throw error;
+    console.error('User creation error:', error); 
+    if (
+      error instanceof ConflictException ||
+      error instanceof NotFoundException
+    ) {
+      throw error;
+    }
+    throw new ConflictException('Failed to create user');
+    }
+  }
+
+  // get user by id
+  async getById(id: number): Promise<Omit<User, 'password'>> {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    const { password, ...result } = user;
+    return result;
+  }
+
+  // Find user by contact info (for authentication)
+  async findByContactInfo(contactInfo: string): Promise<User | null> {
+    try {
+      const user = await this.prisma.user.findFirst({
+        where: { contactInfo },
+      });
+      if (!user) {
+        throw new NotFoundException('User not found');
       }
-      throw new ConflictException('Failed to create user');
+      return user;
+    } catch (error) {
+      throw new ConflictException('Failed to find user by contact info');
     }
   }
 
@@ -159,11 +192,20 @@ export class UserService {
   ) {
     switch (role) {
       case Role.EMPLOYEE:
+        const position = createUserDto.position;
+        const department = createUserDto.department;
+        const managerId = createUserDto.managerId;
+        if (!managerId) {
+          throw new ConflictException('Manager ID is required for employee');
+        }
+        if (!position || !department) {
+          throw new ConflictException('Position and department are required for employee');
+        }
         await tx.employee.create({
           data: {
             userId,
-            position: createUserDto.position || 'To be assigned',
-            department: createUserDto.department || 'To be assigned',
+            position,
+            department,
             seniority: createUserDto.seniority || 0,
             contractStart: createUserDto.contractStart
               ? new Date(createUserDto.contractStart)
@@ -172,7 +214,7 @@ export class UserService {
               ? new Date(createUserDto.contractEnd)
               : null,
             contractType: createUserDto.contractType || ContractType.FullTime,
-            managerId: createUserDto.managerId || null,
+            managerId: createUserDto.managerId,
           },
         });
         break;
@@ -181,7 +223,6 @@ export class UserService {
         await tx.manager.create({
           data: {
             userId,
-            // team relationship will be established when employees are assigned
           },
         });
         break;
@@ -209,6 +250,11 @@ export class UserService {
   }
 
   // Additional helper methods for managing relationships
+
+  //-- hashpassword
+ private async hashPassword(password: string): Promise<string> {
+    return await bcrypt.hash(password, 10);
+  }
 
   async assignEmployeeToManager(
     employeeId: number,
@@ -1379,5 +1425,6 @@ export class UserService {
       throw new ConflictException(`Failed to retrieve HR admin with ID ${hrAdminId}`);
     }
   }
+
 
 }
